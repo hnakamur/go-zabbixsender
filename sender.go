@@ -13,7 +13,7 @@ import (
 )
 
 // https://www.zabbix.com/documentation/current/en/manual/appendix/protocols/zabbix_sender
-// https://www.zabbix.com/documentation/current/en/manual/appendix/items/trapper
+// https://www.zabbix.com/documentation/current/en/manual/config/items/itemtypes/trapper
 
 const defaultZabbixServerPort = 10051
 
@@ -47,6 +47,8 @@ type TrapperData struct {
 	Host  string `json:"host"`
 	Key   string `json:"key"`
 	Value string `json:"value"`
+	Clock int64  `json:"clock,omitzero"`
+	Ns    int64  `json:"ns,omitzero"`
 }
 
 type Response struct {
