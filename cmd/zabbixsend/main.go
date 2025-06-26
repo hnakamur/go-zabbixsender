@@ -1,9 +1,16 @@
 package main
 
+// Use the following command to build a static binary.
+//
+// go build -trimpath -tags netgo,osusergo
+
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -14,16 +21,17 @@ var cli struct {
 	Debug bool `help:"Enable debug mode."`
 
 	Send SendCmd `cmd:"" help:"Send a metric to a Zabbix server."`
+	Run  RunCmd  `cmd:"" help:"Run a command and send metrics (start time before running, elapsed time, and exit code after running)."`
 }
 
 type SendCmd struct {
-	Host  string    `required:"" help:"Hostname for the metric"`
-	Key   string    `required:"" help:"metric item key"`
-	Value string    `required:"" help:"metric value"`
-	Time  time.Time `format:"2006-01-02T15:04:05.999999999" help:"time for the metric in yyyy-mm-ddTHH:MM:SS(.sssssssss)? format"`
+	Host  string    `group:"metric" required:"" help:"Hostname for the metric"`
+	Key   string    `group:"metric" required:"" help:"metric item key"`
+	Value string    `group:"metric" required:"" help:"metric value"`
+	Time  time.Time `group:"metric" format:"2006-01-02T15:04:05.999999999" help:"time for the metric in yyyy-mm-ddTHH:MM:SS(.sssssssss)? format"`
 
-	Server  string        `required:"" help:"Zabbix server address in host:port format."`
-	Timeout time.Duration `default:"5s" help:"send timeout"`
+	Server  string        `group:"zabbix_server" required:"" help:"Zabbix server address in host:port format."`
+	Timeout time.Duration `group:"zabbix_server" default:"5s" help:"send timeout"`
 }
 
 func (c *SendCmd) Run(ctx context.Context) error {
@@ -47,6 +55,90 @@ func (c *SendCmd) Run(ctx context.Context) error {
 	}
 	slog.Info("sent metrics", "response", resp)
 	return nil
+}
+
+type RunCmd struct {
+	Host              string `group:"metric" required:"" help:"Hostname for the metric"`
+	Prefix            string `group:"metric" required:"" help:"metric item key prefix"`
+	StartTimeSuffix   string `group:"metric" default:"_start_time" help:"metric item key suffix for start time"`
+	ElapsedTimeSuffix string `group:"metric" default:"_elapsed_time" help:"metric item key suffix for elapsed time"`
+	ExitCodeSuffix    string `group:"metric" default:"_exit_code" help:"metric item key suffix for exit code"`
+
+	Server  string        `group:"zabbix_server" required:"" help:"Zabbix server address in host:port format."`
+	Timeout time.Duration `group:"zabbix_server" default:"5s" help:"send timeout"`
+
+	Command string   `group:"exec" arg:"" help:"path to command to be executed"`
+	Args    []string `group:"exec" arg:"" optional:"" help:"arguments for the command to be executed"`
+}
+
+func (c *RunCmd) Run(ctx context.Context) error {
+	sender := zabbixsender.Sender{ServerAddress: c.Server, Timeout: c.Timeout}
+	startTime := time.Now()
+
+	{
+		resp, err := sender.Send([]zabbixsender.TrapperData{
+			{
+				Host:  c.Host,
+				Key:   c.Prefix + c.StartTimeSuffix,
+				Value: formatTimeToSecondsFromEpoch(startTime),
+			},
+		})
+		if err != nil {
+			return err
+		}
+		slog.Info("sent pre-run metric", "response", resp)
+	}
+
+	exitCode, cmdErr := runCommand(ctx, c.Command, c.Args...)
+	if cmdErr != nil {
+		slog.Error("command failed", "err", cmdErr)
+	}
+
+	elapsed := time.Since(startTime)
+	{
+		resp, err := sender.Send([]zabbixsender.TrapperData{
+			{
+				Host:  c.Host,
+				Key:   c.Prefix + c.ExitCodeSuffix,
+				Value: strconv.Itoa(exitCode),
+			},
+			{
+				Host:  c.Host,
+				Key:   c.Prefix + c.ElapsedTimeSuffix,
+				Value: formatElapsedTimeInSeconds(elapsed),
+			},
+		})
+		if err != nil {
+			return err
+		}
+		slog.Info("sent post-run metrics", "response", resp)
+	}
+
+	return cmdErr
+}
+
+func formatTimeToSecondsFromEpoch(t time.Time) string {
+	return strconv.FormatInt(t.Unix(), 10)
+}
+
+func formatElapsedTimeInSeconds(d time.Duration) string {
+	return fmt.Sprintf("%g", float64(d)/float64(time.Second))
+}
+
+func runCommand(ctx context.Context, command string, arg ...string) (int, error) {
+	cmd := exec.CommandContext(ctx, command, arg...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	var exitCode int
+	err := cmd.Run()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	return exitCode, err
 }
 
 func main() {
