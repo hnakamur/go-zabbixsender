@@ -51,13 +51,19 @@ type TrapperData struct {
 	Ns    int64  `json:"ns,omitzero"`
 }
 
+type rawResponse struct {
+	Response string `json:"response"`
+	Info     string `json:"info"`
+}
+
 type Response struct {
-	Response     string  `json:"response"`
-	Info         string  `json:"info"`
-	Processed    int     `json:"-"`
-	Failed       int     `json:"-"`
-	Total        int     `json:"-"`
-	SecondsSpent float64 `json:"-"`
+	Response string `json:"response"`
+	Info     string `json:"-"`
+
+	Processed    int     `json:"processed"`
+	Failed       int     `json:"failed"`
+	Total        int     `json:"total"`
+	SecondsSpent float64 `json:"seconds_spent"`
 }
 
 func (s *Sender) Send(data []TrapperData) (*Response, error) {
@@ -159,12 +165,15 @@ func parseResponse(r io.Reader) (*Response, error) {
 		return nil, fmt.Errorf("read response data: %s", err)
 	}
 
-	var resp Response
-	if err := json.Unmarshal(dataBuf, &resp); err != nil {
+	var rawResp rawResponse
+	if err := json.Unmarshal(dataBuf, &rawResp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %s", err)
 	}
 
-	n, err := fmt.Sscanf(resp.Info, "processed: %d; failed: %d; total: %d; seconds spent: %f",
+	resp := Response{
+		Response: rawResp.Response,
+	}
+	n, err := fmt.Sscanf(rawResp.Info, "processed: %d; failed: %d; total: %d; seconds spent: %f",
 		&resp.Processed, &resp.Failed, &resp.Total, &resp.SecondsSpent)
 	if err != nil {
 		return nil, fmt.Errorf("parse response info: %s", err)

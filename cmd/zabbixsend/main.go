@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -46,16 +45,8 @@ func (c *SendCmd) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("sent metrics", "response", senderResponseLogValue{Response: resp})
+	slog.Info("sent metrics", "response", resp)
 	return nil
-}
-
-type senderResponseLogValue struct {
-	Response *zabbixsender.Response
-}
-
-func (v senderResponseLogValue) LogValue() slog.Value {
-	return slog.AnyValue(fmt.Sprintf("%+v", *v.Response))
 }
 
 func main() {
