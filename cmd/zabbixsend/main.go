@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -20,8 +21,9 @@ import (
 var cli struct {
 	Debug bool `help:"Enable debug mode."`
 
-	Send SendCmd `cmd:"" help:"Send a metric to a Zabbix server."`
-	Run  RunCmd  `cmd:"" help:"Run a command and send metrics (start time before running, elapsed time, and exit code after running)."`
+	Send    SendCmd    `cmd:"" help:"Send a metric to a Zabbix server."`
+	Run     RunCmd     `cmd:"" help:"Run a command and send metrics (start time before running, elapsed time, and exit code after running)."`
+	Version VersionCmd `cmd:"" help:"Show version and exit."`
 }
 
 type SendCmd struct {
@@ -139,6 +141,20 @@ func runCommand(ctx context.Context, command string, arg ...string) (int, error)
 		}
 	}
 	return exitCode, err
+}
+
+type VersionCmd struct{}
+
+func (c *VersionCmd) Run(ctx context.Context) error {
+	fmt.Println(Version())
+	return nil
+}
+
+func Version() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		return info.Main.Version
+	}
+	return "(devel)"
 }
 
 func main() {
