@@ -1,48 +1,44 @@
 package main
 
 import (
-	"flag"
-	"log"
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
 	"time"
 
-	zabbix "github.com/hnakamur/go-zabbixsender"
+	"github.com/alecthomas/kong"
+	zabbixsender "github.com/hnakamur/go-zabbixsender"
 )
 
-func main() {
-	serverAddress := flag.String("server", "", "Zabbix server address")
-	timeout := flag.Duration("timeout", 5*time.Second, "send timeout")
-	hostname := flag.String("hostname", "", "hostname for the metric to send")
-	key := flag.String("key", "", "metric key")
-	value := flag.String("value", "", "metric, value")
-	metricTimeStr := flag.String("time", "", "time for the metric in yyyy-mm-ddTHH:MM:SS(.sssssssss)? format")
+var cli struct {
+	Debug bool `help:"Enable debug mode."`
 
-	flag.Parse()
-
-	var metricTime time.Time
-	if *metricTimeStr != "" {
-		var err error
-		metricTime, err = time.ParseInLocation("2006-01-02T03:04:05.999999999", *metricTimeStr, time.Local)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-	if err := run(*serverAddress, *timeout, *hostname, *key, *value, metricTime); err != nil {
-		log.Fatal(err)
-	}
+	Send SendCmd `cmd:"" help:"Send a metric to a Zabbix server."`
 }
 
-func run(serverAddress string, timeout time.Duration, hostname, key, value string, metricTime time.Time) error {
-	sender := zabbix.Sender{ServerAddress: serverAddress, Timeout: timeout}
+type SendCmd struct {
+	Host  string    `required:"" help:"Hostname for the metric"`
+	Key   string    `required:"" help:"metric item key"`
+	Value string    `required:"" help:"metric value"`
+	Time  time.Time `format:"2006-01-02T15:04:05.999999999" help:"time for the metric in yyyy-mm-ddTHH:MM:SS(.sssssssss)? format"`
+
+	Server  string        `required:"" help:"Zabbix server address in host:port format."`
+	Timeout time.Duration `default:"5s" help:"send timeout"`
+}
+
+func (c *SendCmd) Run(ctx context.Context) error {
+	sender := zabbixsender.Sender{ServerAddress: c.Server, Timeout: c.Timeout}
 	var clock, ns int64
-	if !metricTime.IsZero() {
-		clock = metricTime.Unix()
-		ns = metricTime.UnixNano() % int64(time.Second)
+	if !c.Time.IsZero() {
+		clock = c.Time.Unix()
+		ns = c.Time.UnixNano() % int64(time.Second)
 	}
-	resp, err := sender.Send([]zabbix.TrapperData{
+	resp, err := sender.Send([]zabbixsender.TrapperData{
 		{
-			Host:  hostname,
-			Key:   key,
-			Value: value,
+			Host:  c.Host,
+			Key:   c.Key,
+			Value: c.Value,
 			Clock: clock,
 			Ns:    ns,
 		},
@@ -50,6 +46,30 @@ func run(serverAddress string, timeout time.Duration, hostname, key, value strin
 	if err != nil {
 		return err
 	}
-	log.Printf("resp=%+v", resp)
+	slog.Info("sent metrics", "response", senderResponseLogValue{Response: resp})
 	return nil
+}
+
+type senderResponseLogValue struct {
+	Response *zabbixsender.Response
+}
+
+func (v senderResponseLogValue) LogValue() slog.Value {
+	return slog.AnyValue(fmt.Sprintf("%+v", *v.Response))
+}
+
+func main() {
+	slogLevel := new(slog.LevelVar)
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slogLevel}))
+	slog.SetDefault(logger)
+
+	ctx := kong.Parse(&cli)
+	if cli.Debug {
+		slogLevel.Set(slog.LevelDebug)
+	}
+	// kong.BindTo is needed to bind a context.Context value.
+	// See https://github.com/alecthomas/kong/issues/48
+	ctx.BindTo(context.Background(), (*context.Context)(nil))
+	err := ctx.Run()
+	ctx.FatalIfErrorf(err)
 }
