@@ -86,9 +86,11 @@ func (c *RunCmd) Run(ctx context.Context) error {
 			},
 		})
 		if err != nil {
-			return err
+			slog.Error("failed to sent pre-run metric",
+				"keyPrefix", c.Prefix, "err", err)
+		} else {
+			slog.Info("sent pre-run metric", "response", resp)
 		}
-		slog.Info("sent pre-run metric", "response", resp)
 	}
 
 	exitCode, cmdErr := runCommand(ctx, c.Command, c.Args...)
@@ -111,9 +113,11 @@ func (c *RunCmd) Run(ctx context.Context) error {
 			},
 		})
 		if err != nil {
-			return err
+			slog.Error("failed to sent post-run metric",
+				"keyPrefix", c.Prefix, "err", err)
+		} else {
+			slog.Info("sent post-run metrics", "response", resp)
 		}
-		slog.Info("sent post-run metrics", "response", resp)
 	}
 
 	return cmdErr
