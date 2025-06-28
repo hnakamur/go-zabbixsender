@@ -136,7 +136,7 @@ func runCommand(ctx context.Context, command string, arg ...string) (int, error)
 	var exitCode int
 	err := cmd.Run()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr, ok := err.(kong.ExitCoder); ok {
 			exitCode = exitErr.ExitCode()
 		}
 	}
